@@ -347,7 +347,7 @@ def render_dashboard(payload):
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Liner Notes \u2014 {esc(stats['username'])}</title>
+<title>Music Discovery Dashboard \u2014 {esc(stats['username'])}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
@@ -357,7 +357,7 @@ def render_dashboard(payload):
     --paper: #efe7d8;
     --ink: #efe7d8;
     --dim: #a89e8c;
-    --accent: #c98a2c;
+    --accent: #22ff00;
     --accent2: #3e6e64;
     --line: rgba(239,231,216,0.12);
   }}
