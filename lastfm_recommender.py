@@ -505,6 +505,10 @@ def render_dashboard(payload):
     font-family: 'JetBrains Mono', monospace;
   }}
 
+  section.hidden {{
+    display: none;
+  }}
+
   @media (max-width: 560px) {{
     .row {{ grid-template-columns: 22px 1fr 70px; }}
     .row-count {{ display: none; }}
@@ -537,7 +541,7 @@ def render_dashboard(payload):
     {top_artist_rows}
   </section>
 
-  <section>
+  <section class="hidden">
     <h2>Discover Artists</h2>
     <div class="section-note">New-to-you artists, ranked by similarity to what you already play. Excludes anyone already in your library.</div>
     <div class="grid">{artist_cards}</div>
