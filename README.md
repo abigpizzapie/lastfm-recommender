@@ -5,7 +5,8 @@ into Spotify-style "Discover" recommendations — new artists and tracks
 you probably haven't heard, ranked and explained ("because you play X").
 
 It's a Flask web server with a generated HTML dashboard. No database, no
-external services — everything runs on your machine.
+external services beyond two public, key-free APIs — everything runs on
+your machine.
 
 ## How it works
 
@@ -20,8 +21,10 @@ external services — everything runs on your machine.
    genuinely new artists/tracks.
 5. Filters out any tracks you've marked with a thumbs-down (👎), so
    blocked recommendations never resurface.
-6. Serves everything through a Flask web server with a refresh button
-   and track blocking functionality.
+6. Looks up a 30-second preview clip for each recommended track via
+   Apple's iTunes Search API, so you can hear it without leaving the page.
+7. Serves everything through a Flask web server with a refresh button,
+   inline track previews, and track blocking.
 
 No Last.fm login/session is required — only a free API key, since this
 only touches public read-only endpoints.
@@ -74,16 +77,29 @@ only touches public read-only endpoints.
 ## Features
 
 ### Refresh Button
-Click the **Refresh Recommendations** button on the dashboard to regenerate
-everything in the background (takes ~15–30 seconds). The page auto-reloads
-when complete.
+Click the **Refresh Recommendations** button (top-left of the header) to
+regenerate everything in the background (takes ~15–30 seconds). The page
+auto-reloads when complete.
+
+### Track List with Inline Previews
+Discover Tracks is rendered as a compact, scannable list rather than a
+grid of boxes — index, track/artist, the "because of" reason, a match-score
+bar, and links, all on one row. Each row also gets a small **▶ preview
+button**: click it to stream a ~30-second clip of the track right there on
+the dashboard via Apple's iTunes Search API, no API key or login required.
+Only one clip plays at a time — starting a new one stops the last, and the
+icon flips to ⏸ while playing. Tracks Apple's catalog doesn't have (more
+likely for obscure/underground picks) show a disabled, grayed-out button;
+the Last.fm/YouTube/Spotify links next to it still work as a fallback.
 
 ### Track Blocking
 Click the **👎 thumbs-down button** on any recommended track to exclude it
 from future recommendations. Blocked tracks are saved to `blocked_tracks.json`
 and never resurface, even after page reloads, server restarts, or re-runs.
 The dashboard rehydrates blocked keys from the server and keeps a local
-browser copy for offline fallback.
+browser copy for offline fallback. The **Blocked (N)** button (top-right of
+the header) opens a modal listing everything you've blocked, with a
+one-click Unblock per track.
 
 ### Keeping it Fresh
 
@@ -126,6 +142,10 @@ Everything is in `lastfm_recommender.py` — a few knobs worth knowing:
 - `get_top_artists(..., period="overall", limit=200)` — the size of
   your "known artists" exclusion list. Lower it if you want
   recommendations to include artists you've only lightly played.
+- `get_preview_url()` / `ITUNES_REQUEST_DELAY` — the iTunes Search API
+  lookup behind track previews. It's a best-effort, no-key-required call
+  per recommended track; failures or misses just leave that track's
+  preview button disabled rather than breaking the run.
 
 ## Notes & limits
 
@@ -135,6 +155,13 @@ Everything is in `lastfm_recommender.py` — a few knobs worth knowing:
 - Artist/track "similarity" comes entirely from Last.fm's own
   crowd-sourced similarity graph, the same data Last.fm's own
   recommendations are built from.
+- Track previews call Apple's public iTunes Search API (no key/auth
+  needed) once per recommended track, adding a few extra seconds to each
+  refresh. Your server needs outbound access to `itunes.apple.com` for
+  this to work; if it's unreachable, previews just come back disabled
+  and the rest of the dashboard is unaffected.
+- Not every track has a preview available — coverage depends on Apple's
+  catalog, so expect some misses on more obscure recommendations.
 - If your scrobble history is thin (a few hundred scrobbles), the
   "Discover" lists may come back sparse — the algorithm needs a
   reasonable number of top artists to seed from.
@@ -150,4 +177,3 @@ Everything is in `lastfm_recommender.py` — a few knobs worth knowing:
 - `recommendations.json` — Raw recommendation data as JSON
 - `blocked_tracks.json` — List of blocked track keys (auto-created on first block)
 - `lastfm-dashboard.service` — systemd service file for persistent running
-````
