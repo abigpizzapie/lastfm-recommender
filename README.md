@@ -81,7 +81,9 @@ when complete.
 ### Track Blocking
 Click the **👎 thumbs-down button** on any recommended track to exclude it
 from future recommendations. Blocked tracks are saved to `blocked_tracks.json`
-and never resurface, even after server restarts or re-runs.
+and never resurface, even after page reloads, server restarts, or re-runs.
+The dashboard rehydrates blocked keys from the server and keeps a local
+browser copy for offline fallback.
 
 ### Keeping it Fresh
 
