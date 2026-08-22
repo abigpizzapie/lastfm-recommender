@@ -1,0 +1,14 @@
+[Unit]
+Description=Last.fm recommendation dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/lastfm-recommender
+ExecStart=/opt/lastfm-recommender/venv/bin/python3 /opt/lastfm-recommender/server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
