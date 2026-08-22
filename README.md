@@ -8,7 +8,7 @@ It's a Flask web server with a generated HTML dashboard. No database, no
 external services beyond two public, key-free APIs — everything runs on
 your machine.
 
-The below instructions are for installing directly into a Python Environment see the proxmoxinstall.md file for instructions to install to an LXC container.
+The below instructions are for installing directly into a Python Environment see the proxmoxinstall.txt file for instructions to install to an LXC container.
 
 ## How it works
 
