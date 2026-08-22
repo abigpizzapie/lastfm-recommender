@@ -68,6 +68,14 @@ def save_blocked_tracks(blocked):
     BLOCKED_TRACKS_PATH.write_text(json.dumps(data, indent=2))
 
 
+def parse_track_key(key):
+    """Parse a track key 'artist::track' back into components."""
+    parts = key.split("::")
+    if len(parts) == 2:
+        return parts[0], parts[1]
+    return key, ""
+
+
 # --------------------------------------------------------------------------
 # SVG icon helpers
 # --------------------------------------------------------------------------
@@ -402,6 +410,11 @@ def render_dashboard(payload):
     padding-bottom: 28px;
     margin-bottom: 40px;
   }}
+  .header-buttons {{
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }}
   .btn-refresh {{
     font-family: 'JetBrains Mono', monospace;
     font-size: 12px;
@@ -417,6 +430,27 @@ def render_dashboard(payload):
   }}
   .btn-refresh:hover {{ background: #dba043; }}
   .btn-refresh:focus-visible {{ outline: 2px solid var(--paper); outline-offset: 2px; }}
+  .btn-blocked {{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    background: var(--dim);
+    color: var(--panel);
+    border: none;
+    padding: 10px 18px;
+    border-radius: 4px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }}
+  .btn-blocked:hover {{ background: var(--paper); }}
+  .btn-blocked:focus-visible {{ outline: 2px solid var(--accent); outline-offset: 2px; }}
+  .btn-blocked.has-blocked {{
+    background: var(--accent2);
+    color: var(--paper);
+  }}
+  .btn-blocked.has-blocked:hover {{ background: #4a8074; }}
+  
   .eyebrow {{
     font-family: 'JetBrains Mono', monospace;
     font-size: 12px;
@@ -575,6 +609,102 @@ def render_dashboard(payload):
 
   .empty {{ color: var(--dim); font-size: 14px; }}
 
+  .modal {{
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.8);
+  }}
+  .modal.show {{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }}
+  .modal-content {{
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 32px;
+    max-width: 500px;
+    max-height: 70vh;
+    overflow-y: auto;
+    color: var(--ink);
+  }}
+  .modal-header {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 16px;
+  }}
+  .modal-header h2 {{
+    margin: 0;
+    font-family: 'Fraunces', serif;
+    font-size: 20px;
+  }}
+  .modal-close {{
+    background: none;
+    border: none;
+    color: var(--dim);
+    font-size: 24px;
+    cursor: pointer;
+    padding: 0;
+    width: 28px;
+    height: 28px;
+  }}
+  .modal-close:hover {{
+    color: var(--paper);
+  }}
+  .blocked-track-item {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    border-bottom: 1px solid var(--line);
+    font-size: 14px;
+  }}
+  .blocked-track-item:last-child {{
+    border-bottom: none;
+  }}
+  .blocked-track-info {{
+    flex: 1;
+  }}
+  .blocked-track-name {{
+    font-weight: 500;
+    color: var(--paper);
+    margin-bottom: 4px;
+  }}
+  .blocked-track-artist {{
+    font-size: 12px;
+    color: var(--dim);
+  }}
+  .btn-unblock {{
+    background: none;
+    border: none;
+    color: var(--accent2);
+    cursor: pointer;
+    padding: 4px 8px;
+    font-size: 12px;
+    text-transform: uppercase;
+    font-family: 'JetBrains Mono', monospace;
+    white-space: nowrap;
+    margin-left: 12px;
+  }}
+  .btn-unblock:hover {{
+    color: #4a8074;
+  }}
+  .modal-empty {{
+    color: var(--dim);
+    text-align: center;
+    padding: 20px;
+    font-size: 14px;
+  }}
+
   footer {{
     border-top: 1px solid var(--line);
     padding-top: 20px;
@@ -590,6 +720,17 @@ def render_dashboard(payload):
   @media (max-width: 560px) {{
     .row {{ grid-template-columns: 22px 1fr 70px; }}
     .row-count {{ display: none; }}
+    .header-buttons {{
+      flex-direction: column;
+      width: 100%;
+    }}
+    .btn-refresh, .btn-blocked {{
+      width: 100%;
+    }}
+    .modal-content {{
+      margin: 20px;
+      max-width: calc(100% - 40px);
+    }}
   }}
 </style>
 </head>
@@ -602,9 +743,12 @@ def render_dashboard(payload):
       <h1>{esc(stats['username'])}'s Discovery Sheet</h1>
       <div class="sub">Generated {esc(stats['generated_at'])} from {stats['known_artist_count']:,} known artists on Last.fm</div>
     </div>
-    <form method="post" action="/refresh">
-      <button type="submit" class="btn-refresh">Refresh Recommendations</button>
-    </form>
+    <div class="header-buttons">
+      <button type="button" class="btn-blocked" id="btn-show-blocked" title="View blocked tracks">Blocked (0)</button>
+      <form method="post" action="/refresh" style="margin: 0;">
+        <button type="submit" class="btn-refresh">Refresh Recommendations</button>
+      </form>
+    </div>
   </header>
 
   <section>
@@ -637,26 +781,136 @@ def render_dashboard(payload):
 
 </div>
 
+<!-- Blocked Tracks Modal -->
+<div id="blocked-modal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>Blocked Tracks</h2>
+      <button type="button" class="modal-close" id="modal-close">&times;</button>
+    </div>
+    <div id="blocked-list">
+      <div class="modal-empty">No blocked tracks yet</div>
+    </div>
+  </div>
+</div>
+
 <script>
+// Load blocked tracks from localStorage
+function loadBlockedTracks() {{
+  const stored = localStorage.getItem('blockedTracks');
+  return stored ? JSON.parse(stored) : {{}};
+}}
+
+function saveBlockedTracks(blocked) {{
+  localStorage.setItem('blockedTracks', JSON.stringify(blocked));
+}}
+
+function updateBlockedButton(blocked) {{
+  const btn = document.getElementById('btn-show-blocked');
+  const count = Object.keys(blocked).length;
+  btn.textContent = `Blocked (${{count}})`;
+  if (count > 0) {{
+    btn.classList.add('has-blocked');
+  }} else {{
+    btn.classList.remove('has-blocked');
+  }}
+}}
+
+function renderBlockedList(blocked) {{
+  const listContainer = document.getElementById('blocked-list');
+  const keys = Object.keys(blocked).sort();
+  
+  if (keys.length === 0) {{
+    listContainer.innerHTML = '<div class="modal-empty">No blocked tracks yet</div>';
+    return;
+  }}
+  
+  listContainer.innerHTML = keys.map(key => {{
+    const [artist, track] = key.split('::');
+    return `
+      <div class="blocked-track-item">
+        <div class="blocked-track-info">
+          <div class="blocked-track-name">${{escapeHtml(track)}}</div>
+          <div class="blocked-track-artist">${{escapeHtml(artist)}}</div>
+        </div>
+        <button class="btn-unblock" data-key="${{escapeHtml(key)}}">Unblock</button>
+      </div>
+    `;
+  }}).join('');
+  
+  // Attach unblock handlers
+  listContainer.querySelectorAll('.btn-unblock').forEach(btn => {{
+    btn.addEventListener('click', (e) => {{
+      const key = btn.dataset.key;
+      const card = document.querySelector(`[data-track-key="${{escapeHtml(key)}}"]`);
+      delete blocked[key];
+      saveBlockedTracks(blocked);
+      updateBlockedButton(blocked);
+      renderBlockedList(blocked);
+      if (card) {{
+        card.classList.remove('blocked');
+        const blockBtn = card.querySelector('.btn-block');
+        if (blockBtn) blockBtn.disabled = false;
+      }}
+    }});
+  }});
+}}
+
+function escapeHtml(text) {{
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}}
+
+// Initialize
+let blocked = loadBlockedTracks();
+updateBlockedButton(blocked);
+
+// Modal controls
+const modal = document.getElementById('blocked-modal');
+const showBtn = document.getElementById('btn-show-blocked');
+const closeBtn = document.getElementById('modal-close');
+
+showBtn.addEventListener('click', () => {{
+  renderBlockedList(blocked);
+  modal.classList.add('show');
+}});
+
+closeBtn.addEventListener('click', () => {{
+  modal.classList.remove('show');
+}});
+
+modal.addEventListener('click', (e) => {{
+  if (e.target === modal) {{
+    modal.classList.remove('show');
+  }}
+}});
+
+// Block track handlers
 document.querySelectorAll('.btn-block').forEach(btn => {{
   btn.addEventListener('click', async (e) => {{
     e.preventDefault();
     const trackKey = btn.dataset.trackKey;
     const card = btn.closest('.card');
     
+    // Store in localStorage
+    blocked[trackKey] = true;
+    saveBlockedTracks(blocked);
+    updateBlockedButton(blocked);
+    
+    // Update UI
+    card.classList.add('blocked');
+    btn.disabled = true;
+    
+    // Try to sync with server if available
     try {{
-      const response = await fetch('/block-track', {{
+      await fetch('/block-track', {{
         method: 'POST',
         headers: {{'Content-Type': 'application/json'}},
         body: JSON.stringify({{track_key: trackKey}})
       }});
-      
-      if (response.ok) {{
-        card.classList.add('blocked');
-        btn.disabled = true;
-      }}
     }} catch (err) {{
-      console.error('Failed to block track:', err);
+      console.log('Server sync failed (offline mode):', err);
     }}
   }});
 }});
