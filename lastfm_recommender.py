@@ -13,8 +13,8 @@ Usage:
        and fill in your Last.fm API key (https://www.last.fm/api/account/create)
        and username.
     2. pip install -r requirements.txt
-    3. python3 lastfm_recommender.py
-    4. open dashboard.html in a browser
+    3. python3 server.py
+    4. open http://localhost:8080 in a browser
 
 No Last.fm session/auth is required -- this only touches public read-only
 endpoints (user.*, artist.*, track.*), so all it needs is an API key.
@@ -43,6 +43,28 @@ BASE_DIR = Path(__file__).parent
 CONFIG_PATH = BASE_DIR / "config.json"
 OUTPUT_HTML = BASE_DIR / "dashboard.html"
 OUTPUT_JSON = BASE_DIR / "recommendations.json"
+BLOCKED_TRACKS_PATH = BASE_DIR / "blocked_tracks.json"
+
+
+# --------------------------------------------------------------------------
+# Blocked tracks management
+# --------------------------------------------------------------------------
+
+def load_blocked_tracks():
+    """Load the set of blocked track keys from disk."""
+    if not BLOCKED_TRACKS_PATH.exists():
+        return set()
+    try:
+        data = json.loads(BLOCKED_TRACKS_PATH.read_text())
+        return set(data.get("blocked", []))
+    except Exception:
+        return set()
+
+
+def save_blocked_tracks(blocked):
+    """Save the set of blocked track keys to disk."""
+    data = {"blocked": sorted(list(blocked))}
+    BLOCKED_TRACKS_PATH.write_text(json.dumps(data, indent=2))
 
 
 # --------------------------------------------------------------------------
@@ -200,7 +222,7 @@ def recommend_artists(api_key, seed_weights, known_artists,
     ]
 
 
-def recommend_tracks(api_key, seed_tracks, known_track_keys,
+def recommend_tracks(api_key, seed_tracks, known_track_keys, blocked_track_keys,
                       seed_limit=20, per_seed=15, result_limit=40):
     seeds = seed_tracks[:seed_limit]
     max_pc = max((int(t.get("playcount", 0) or 0) for t in seeds), default=1) or 1
@@ -220,7 +242,7 @@ def recommend_tracks(api_key, seed_tracks, known_track_keys,
             if not cand_artist or not cand_track:
                 continue
             key = f"{cand_artist.lower()}::{cand_track.lower()}"
-            if key in known_track_keys:
+            if key in known_track_keys or key in blocked_track_keys:
                 continue
             match = float(s.get("match", 0) or 0)
             contribution = seed_weight * match
@@ -239,6 +261,7 @@ def recommend_tracks(api_key, seed_tracks, known_track_keys,
             "track": m["track"],
             "score": round(s, 4),
             "because_of": best_reason[k][0],
+            "track_key": k,
             "lastfm_url": m["url"] or f"https://www.last.fm/music/{quote_plus(m['artist'])}/_/{quote_plus(m['track'])}",
             "youtube_url": f"https://www.youtube.com/results?search_query={quote_plus(query)}",
             "spotify_url": f"https://open.spotify.com/search/{quote_plus(query)}",
@@ -303,7 +326,7 @@ def render_dashboard(payload):
         </div>""" for i, a in enumerate(artist_recs, 1)) or '<p class="empty">No new artists surfaced this run.</p>'
 
     track_cards = "".join(f"""
-        <div class="card">
+        <div class="card" data-track-key="{esc(t['track_key'])}">
           <div class="card-index">{i:02d}</div>
           <div class="card-body">
             <div class="card-name">{esc(t['track'])}</div>
@@ -315,6 +338,7 @@ def render_dashboard(payload):
               <a href="{esc(t['youtube_url'])}" target="_blank" rel="noopener">YouTube</a>
               <a href="{esc(t['spotify_url'])}" target="_blank" rel="noopener">Spotify</a>
             </div>
+            <button class="btn-block" data-track-key="{esc(t['track_key'])}" title="Don't recommend this track again">👎</button>
           </div>
         </div>""" for i, t in enumerate(track_recs, 1)) or '<p class="empty">No new tracks surfaced this run.</p>'
 
@@ -451,6 +475,7 @@ def render_dashboard(payload):
     border: 1px solid var(--line);
     border-radius: 4px;
     padding: 16px;
+    position: relative;
   }}
   .card-index {{
     font-family: 'JetBrains Mono', monospace;
@@ -493,6 +518,33 @@ def render_dashboard(payload):
   .card-links a:hover {{
     color: var(--paper);
     border-bottom-color: var(--accent);
+  }}
+
+  .btn-block {{
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background: none;
+    border: 1px solid var(--line);
+    color: var(--dim);
+    padding: 6px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s ease;
+  }}
+  .btn-block:hover {{
+    background: rgba(255, 0, 0, 0.1);
+    color: #ff6b6b;
+    border-color: #ff6b6b;
+  }}
+  .btn-block:active {{
+    transform: scale(0.95);
+  }}
+
+  .card.blocked {{
+    opacity: 0.4;
+    pointer-events: none;
   }}
 
   .empty {{ color: var(--dim); font-size: 14px; }}
@@ -554,10 +606,35 @@ def render_dashboard(payload):
   </section>
 
   <footer>
-    Built from public Last.fm data \u00b7 re-run lastfm_recommender.py anytime to refresh
+    Built from public Last.fm data \u00b7 re-run server.py anytime to refresh
   </footer>
 
 </div>
+
+<script>
+document.querySelectorAll('.btn-block').forEach(btn => {{
+  btn.addEventListener('click', async (e) => {{
+    e.preventDefault();
+    const trackKey = btn.dataset.trackKey;
+    const card = btn.closest('.card');
+    
+    try {{
+      const response = await fetch('/block-track', {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify({{track_key: trackKey}})
+      }});
+      
+      if (response.ok) {{
+        card.classList.add('blocked');
+        btn.disabled = true;
+      }}
+    }} catch (err) {{
+      console.error('Failed to block track:', err);
+    }}
+  }});
+}});
+</script>
 </body>
 </html>
 """
@@ -589,13 +666,15 @@ def generate(config):
         if artist and t.get("name"):
             known_track_keys.add(f"{artist.lower()}::{t['name'].lower()}")
 
+    blocked_track_keys = load_blocked_tracks()
+
     seed_weights = build_seed_weights(overall_artists, recent_artists)
 
     print("Walking artist similarity graph (this takes ~15-20s)...")
     artist_recs = recommend_artists(api_key, seed_weights, known_artists)
 
     print("Walking track similarity graph...")
-    track_recs = recommend_tracks(api_key, recent_tracks, known_track_keys)
+    track_recs = recommend_tracks(api_key, recent_tracks, known_track_keys, blocked_track_keys)
 
     print("Building taste profile...")
     taste_tags = build_taste_tags(api_key, seed_weights)
@@ -623,7 +702,7 @@ def generate(config):
 def main():
     config = load_config()
     generate(config)
-    print("\nDone. Open dashboard.html in your browser.")
+    print("\nDone. Open http://localhost:8080 in your browser (requires server.py to be running).")
 
 
 if __name__ == "__main__":
