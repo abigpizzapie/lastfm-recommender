@@ -38,7 +38,9 @@ except ImportError:  # pragma: no cover - Python <3.9 fallback
 import requests
 
 API_ROOT = "https://ws.audioscrobbler.com/2.0/"
+ITUNES_SEARCH_ROOT = "https://itunes.apple.com/search"
 REQUEST_DELAY = 0.2  # seconds between calls, keeps us well under Last.fm's rate limit
+ITUNES_REQUEST_DELAY = 0.1
 
 BASE_DIR = Path(__file__).parent
 CONFIG_PATH = BASE_DIR / "config.json"
@@ -134,6 +136,38 @@ def api_call(method, api_key, **params):
     if "error" in data:
         raise RuntimeError(f"Last.fm error {data['error']} on {method}: {data.get('message')}")
     return data
+
+
+def get_preview_url(artist, track):
+    """Look up a ~30s preview clip for a track via Apple's public iTunes
+    Search API. No API key/auth required -- it's a plain read-only search
+    endpoint.
+
+    Returns None (never raises) if nothing is found or the request fails,
+    since a missing preview shouldn't ever break dashboard generation --
+    it's a nice-to-have, and the track's Last.fm/YouTube/Spotify links
+    still work either way.
+    """
+    try:
+        resp = requests.get(
+            ITUNES_SEARCH_ROOT,
+            params={
+                "term": f"{artist} {track}",
+                "media": "music",
+                "entity": "song",
+                "limit": 1,
+            },
+            timeout=8,
+        )
+        time.sleep(ITUNES_REQUEST_DELAY)
+        if resp.status_code != 200:
+            return None
+        results = resp.json().get("results", [])
+        if not results:
+            return None
+        return results[0].get("previewUrl") or None
+    except (requests.RequestException, ValueError):
+        return None
 
 
 def get_top_artists(api_key, user, period, limit=200):
@@ -289,6 +323,7 @@ def recommend_tracks(api_key, seed_tracks, known_track_keys, blocked_track_keys,
             "lastfm_url": m["url"] or f"https://www.last.fm/music/{quote_plus(m['artist'])}/_/{quote_plus(m['track'])}",
             "youtube_url": f"https://www.youtube.com/results?search_query={quote_plus(query)}",
             "spotify_url": f"https://open.spotify.com/search/{quote_plus(query)}",
+            "preview_url": get_preview_url(m["artist"], m["track"]),
         })
     return results
 
@@ -314,6 +349,15 @@ def esc(s):
 def bar(pct, color):
     pct = max(2, min(100, pct))
     return f'<div class="bar"><div class="bar-fill" style="width:{pct:.0f}%;background:{color}"></div></div>'
+
+
+def preview_button(preview_url):
+    if not preview_url:
+        return '<button type="button" class="btn-preview" disabled title="No preview available">\u25b6</button>'
+    return (
+        f'<button type="button" class="btn-preview" data-preview-url="{esc(preview_url)}" '
+        f'title="Play 30s preview">\u25b6</button>'
+    )
 
 
 def render_dashboard(payload):
@@ -350,20 +394,20 @@ def render_dashboard(payload):
         </div>""" for i, a in enumerate(artist_recs, 1)) or '<p class="empty">No new artists surfaced this run.</p>'
 
     track_cards = "".join(f"""
-        <div class="card track-card" data-track-key="{esc(t['track_key'])}">
-          <div class="card-index">{i:02d}</div>
-          <div class="card-body">
-            <div class="card-name">{esc(t['track'])}</div>
-            <div class="card-sub">{esc(t['artist'])}</div>
-            <div class="card-reason">because of <strong>{esc(t['because_of'])}</strong></div>
-            {bar(100 * t['score'] / max_track_score, 'var(--accent2)')}
-            <div class="card-links">
-              <a href="{esc(t['lastfm_url'])}" target="_blank" rel="noopener">Last.fm</a>
-              <a href="{esc(t['youtube_url'])}" target="_blank" rel="noopener">YouTube</a>
-              <a href="{esc(t['spotify_url'])}" target="_blank" rel="noopener">Spotify</a>
-            </div>
-            <button class="btn-block" data-track-key="{esc(t['track_key'])}" title="Don't recommend this track again"></button>
+        <div class="track-row" data-track-key="{esc(t['track_key'])}">
+          <span class="track-row-index">{i:02d}</span>
+          <div class="track-row-info">
+            <div class="track-row-title">{esc(t['track'])}<span class="track-row-sep"> \u2014 </span><span class="track-row-artist">{esc(t['artist'])}</span></div>
+            <div class="track-row-reason">because of <strong>{esc(t['because_of'])}</strong></div>
           </div>
+          {bar(100 * t['score'] / max_track_score, 'var(--accent2)')}
+          <div class="track-row-links">
+            <a href="{esc(t['lastfm_url'])}" target="_blank" rel="noopener">Last.fm</a>
+            <a href="{esc(t['youtube_url'])}" target="_blank" rel="noopener">YouTube</a>
+            <a href="{esc(t['spotify_url'])}" target="_blank" rel="noopener">Spotify</a>
+          </div>
+          {preview_button(t.get('preview_url'))}
+          <button class="btn-block" data-track-key="{esc(t['track_key'])}" title="Don't recommend this track again"></button>
         </div>""" for i, t in enumerate(track_recs, 1)) or '<p class="empty">No new tracks surfaced this run.</p>'
 
     # Generate SVG data URIs for the minus icon
@@ -574,19 +618,104 @@ def render_dashboard(payload):
     border-bottom-color: var(--accent);
   }}
 
-  .track-card {{
-    padding-bottom: 52px;
+  .track-list {{
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }}
-  .track-card .card-links {{
-    padding-right: 44px;
+  .track-row {{
+    display: grid;
+    grid-template-columns: 26px minmax(140px, 1fr) 90px auto 24px 28px;
+    align-items: center;
+    gap: 16px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 10px 14px;
+    padding-bottom: 10px;
+  }}
+  .track-row-index {{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--accent2);
+    flex-shrink: 0;
+  }}
+  .track-row-info {{ min-width: 0; }}
+  .track-row-title {{
+    font-family: 'Fraunces', serif;
+    font-size: 15px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }}
+  .track-row-sep {{ color: var(--dim); font-weight: 400; }}
+  .track-row-artist {{ color: var(--dim); font-weight: 400; font-size: 13px; }}
+  .track-row-reason {{
+    font-size: 11px;
+    color: var(--dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }}
+  .track-row-reason strong {{ color: var(--paper); font-weight: 500; }}
+
+  .track-row-links {{
+    display: flex;
+    gap: 10px;
+  }}
+  .track-row-links a {{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--dim);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    white-space: nowrap;
+  }}
+  .track-row-links a:hover {{
+    color: var(--paper);
+    border-bottom-color: var(--accent);
+  }}
+
+  .btn-preview {{
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    color: var(--accent2);
+    font-size: 10px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    justify-self: end;
+  }}
+  .btn-preview:hover {{
+    color: var(--accent);
+    border-color: var(--accent);
+    transform: scale(1.08);
+  }}
+  .btn-preview.playing {{
+    color: var(--accent);
+    border-color: var(--accent);
+  }}
+  .btn-preview:disabled {{
+    opacity: 0.25;
+    cursor: not-allowed;
+  }}
+  .btn-preview:disabled:hover {{
+    transform: none;
   }}
 
   .btn-block {{
-    position: absolute;
-    bottom: 12px;
-    right: 12px;
-    width: 28px;
-    height: 28px;
+    position: static;
+    width: 24px;
+    height: 24px;
     background: none;
     border: none;
     padding: 0;
@@ -596,6 +725,7 @@ def render_dashboard(payload):
     background-size: contain;
     background-repeat: no-repeat;
     background-position: center;
+    justify-self: end;
   }}
   .btn-block:hover {{
     transform: scale(1.1);
@@ -609,7 +739,7 @@ def render_dashboard(payload):
     cursor: not-allowed;
   }}
 
-  .track-card.blocked {{
+  .track-row.blocked {{
     display: none;
   }}
 
@@ -726,6 +856,20 @@ def render_dashboard(payload):
   @media (max-width: 560px) {{
     .row {{ grid-template-columns: 22px 1fr 70px; }}
     .row-count {{ display: none; }}
+    .track-row {{
+      grid-template-columns: 22px 1fr 24px 28px;
+      grid-template-areas:
+        "index info preview block"
+        "bar bar bar bar"
+        "links links links links";
+      row-gap: 8px;
+    }}
+    .track-row-index {{ grid-area: index; }}
+    .track-row-info {{ grid-area: info; }}
+    .track-row .bar {{ grid-area: bar; }}
+    .track-row-links {{ grid-area: links; }}
+    .track-row .btn-preview {{ grid-area: preview; }}
+    .track-row .btn-block {{ grid-area: block; }}
     .header-buttons {{
       flex-direction: column;
       width: 100%;
@@ -750,10 +894,10 @@ def render_dashboard(payload):
       <div class="sub">Generated {esc(stats['generated_at'])} from {stats['known_artist_count']:,} known artists on Last.fm</div>
     </div>
     <div class="header-buttons">
-      <button type="button" class="btn-blocked" id="btn-show-blocked" title="View blocked tracks">Blocked (0)</button>
       <form method="post" action="/refresh" style="margin: 0;">
         <button type="submit" class="btn-refresh">Refresh Recommendations</button>
       </form>
+      <button type="button" class="btn-blocked" id="btn-show-blocked" title="View blocked tracks">Blocked (0)</button>
     </div>
   </header>
 
@@ -778,7 +922,7 @@ def render_dashboard(payload):
   <section>
     <h2>Discover Tracks</h2>
     <div class="section-note">Individual tracks similar to your most-played songs this quarter, excluding anything you've already scrobbled.</div>
-    <div class="grid">{track_cards}</div>
+    <div class="track-list">{track_cards}</div>
   </section>
 
   <footer>
@@ -786,6 +930,8 @@ def render_dashboard(payload):
   </footer>
 
 </div>
+
+<audio id="preview-player" preload="none"></audio>
 
 <!-- Blocked Tracks Modal -->
 <div id="blocked-modal" class="modal">
@@ -885,7 +1031,7 @@ function renderBlockedList(blocked) {{
 }}
 
 function applyBlockedTracks(blocked) {{
-  document.querySelectorAll('.track-card[data-track-key]').forEach(card => {{
+  document.querySelectorAll('.track-row[data-track-key]').forEach(card => {{
     const trackKey = card.dataset.trackKey;
     const blockBtn = card.querySelector('.btn-block');
     if (blocked[trackKey]) {{
@@ -932,7 +1078,7 @@ document.querySelectorAll('.btn-block').forEach(btn => {{
   btn.addEventListener('click', async (e) => {{
     e.preventDefault();
     const trackKey = btn.dataset.trackKey;
-    const card = btn.closest('.card');
+    const card = btn.closest('.track-row');
     
     // Store in localStorage
     blocked[trackKey] = true;
@@ -963,6 +1109,52 @@ async function initBlockedState() {{
 }}
 
 initBlockedState();
+
+// Inline track preview playback (30s clips via iTunes Search API)
+(function() {{
+  const player = document.getElementById('preview-player');
+  let currentBtn = null;
+
+  function resetBtn() {{
+    if (currentBtn) {{
+      currentBtn.classList.remove('playing');
+      currentBtn.textContent = '\u25b6';
+    }}
+  }}
+
+  document.querySelectorAll('.btn-preview[data-preview-url]').forEach(btn => {{
+    btn.addEventListener('click', () => {{
+      if (currentBtn === btn) {{
+        if (player.paused) {{
+          player.play();
+        }} else {{
+          player.pause();
+        }}
+        return;
+      }}
+      resetBtn();
+      currentBtn = btn;
+      player.src = btn.dataset.previewUrl;
+      player.play().catch(() => {{
+        // Autoplay/decoding can fail silently in some browsers; reset UI.
+        resetBtn();
+        currentBtn = null;
+      }});
+    }});
+  }});
+
+  player.addEventListener('play', () => {{
+    if (currentBtn) {{
+      currentBtn.classList.add('playing');
+      currentBtn.textContent = '\u23f8';
+    }}
+  }});
+  player.addEventListener('pause', resetBtn);
+  player.addEventListener('ended', () => {{
+    resetBtn();
+    currentBtn = null;
+  }});
+}})();
 </script>
 </body>
 </html>

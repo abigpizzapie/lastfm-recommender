@@ -19,7 +19,7 @@ class TrackBlockingTests(unittest.TestCase):
         lr.BLOCKED_TRACKS_PATH = self.original_blocked_path
         self.tmpdir.cleanup()
 
-    def test_track_cards_render_bottom_right_block_button_layout(self):
+    def test_track_rows_render_list_layout_with_block_button(self):
         payload = {
             "stats": {
                 "username": "tester",
@@ -44,11 +44,10 @@ class TrackBlockingTests(unittest.TestCase):
         lr.render_dashboard(payload)
         html = lr.OUTPUT_HTML.read_text(encoding="utf-8")
 
-        self.assertIn('class="card track-card"', html)
-        self.assertIn(".track-card {", html)
-        self.assertIn("padding-bottom: 52px;", html)
-        self.assertIn("bottom: 12px;", html)
-        self.assertNotIn("top: 12px;", html)
+        self.assertIn('class="track-list"', html)
+        self.assertIn('class="track-row" data-track-key="artist a::song a"', html)
+        self.assertIn(".track-row {", html)
+        self.assertIn('class="btn-block"', html)
 
     def test_blocked_tracks_persist_to_disk(self):
         blocked = {"artist a::song a", "artist b::song b"}
@@ -64,6 +63,63 @@ class TrackBlockingTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {"blocked": ["artist a::song a"]})
+
+    def test_preview_button_enabled_when_preview_url_present(self):
+        payload = {
+            "stats": {
+                "username": "tester",
+                "generated_at": "2026-01-01 00:00",
+                "known_artist_count": 1,
+                "top_tags": [],
+                "top_artists": [],
+            },
+            "artist_recs": [],
+            "track_recs": [{
+                "track": "Song A",
+                "artist": "Artist A",
+                "score": 1.0,
+                "because_of": "Seed Song",
+                "track_key": "artist a::song a",
+                "lastfm_url": "https://last.fm",
+                "youtube_url": "https://youtube.com",
+                "spotify_url": "https://spotify.com",
+                "preview_url": "https://example.com/preview.m4a",
+            }],
+        }
+
+        lr.render_dashboard(payload)
+        html = lr.OUTPUT_HTML.read_text(encoding="utf-8")
+
+        self.assertIn('class="btn-preview" data-preview-url="https://example.com/preview.m4a"', html)
+        self.assertNotIn('class="btn-preview" disabled', html)
+
+    def test_preview_button_disabled_when_preview_url_missing(self):
+        payload = {
+            "stats": {
+                "username": "tester",
+                "generated_at": "2026-01-01 00:00",
+                "known_artist_count": 1,
+                "top_tags": [],
+                "top_artists": [],
+            },
+            "artist_recs": [],
+            "track_recs": [{
+                "track": "Song A",
+                "artist": "Artist A",
+                "score": 1.0,
+                "because_of": "Seed Song",
+                "track_key": "artist a::song a",
+                "lastfm_url": "https://last.fm",
+                "youtube_url": "https://youtube.com",
+                "spotify_url": "https://spotify.com",
+                "preview_url": None,
+            }],
+        }
+
+        lr.render_dashboard(payload)
+        html = lr.OUTPUT_HTML.read_text(encoding="utf-8")
+
+        self.assertIn('class="btn-preview" disabled', html)
 
 
 if __name__ == "__main__":
