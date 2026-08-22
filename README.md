@@ -1,11 +1,12 @@
+````markdown
 # Last.fm Recommendation Engine
 
 A self-hosted, Linux-friendly tool that turns your Last.fm scrobble history
 into Spotify-style "Discover" recommendations — new artists and tracks
 you probably haven't heard, ranked and explained ("because you play X").
 
-It's a single Python script + a generated static HTML dashboard. No
-database, no server process, nothing to keep running.
+It's a Flask web server with a generated HTML dashboard. No database, no
+external services — everything runs on your machine.
 
 ## How it works
 
@@ -18,8 +19,10 @@ database, no server process, nothing to keep running.
    scoring every candidate by `seed_weight × similarity_match`.
 4. Filters out anything you've already scrobbled, so you only see
    genuinely new artists/tracks.
-5. Renders everything into a single `dashboard.html` file you open
-   in a browser.
+5. Filters out any tracks you've marked with a thumbs-down (👎), so
+   blocked recommendations never resurface.
+6. Serves everything through a Flask web server with a refresh button
+   and track blocking functionality.
 
 No Last.fm login/session is required — only a free API key, since this
 only touches public read-only endpoints.
@@ -55,63 +58,58 @@ only touches public read-only endpoints.
    inside the container, or just set this field and skip touching the
    container's clock.
 
-4. Run it:
+4. Run the server:
    ```bash
-   python3 lastfm_recommender.py
+   python3 server.py
    ```
 
-   This takes roughly 15-30 seconds (it's making ~60-80 rate-limited
-   calls to Last.fm's API). It writes:
-   - `recommendations.json` — raw data, if you want to script against it
-   - `dashboard.html` — the visual report
+   This starts a Flask web server on port `8080`. Open your browser to
+   `http://localhost:8080`. The first request generates a dashboard if
+   one doesn't exist yet.
 
-5. Open `dashboard.html` in any browser (double-click it, or `xdg-open dashboard.html`).
+5. Access your dashboard:
+   - **Locally:** `http://localhost:8080`
+   - **Over the network:** Point your reverse proxy (nginx, Caddy, etc.)
+     at `http://<host>:8080`
 
-## Running it as a persistent server (with a Refresh button)
+## Features
 
-If you're hosting this somewhere reachable over the network — a Proxmox
-LXC container behind nginx, for example — run `server.py` instead of
-the script directly. It serves the dashboard over HTTP and adds a
-**Refresh Recommendations** button to the page that regenerates
-everything in the background, so you don't need shell access to
-refresh it.
+### Refresh Button
+Click the **Refresh Recommendations** button on the dashboard to regenerate
+everything in the background (takes ~15–30 seconds). The page auto-reloads
+when complete.
+
+### Track Blocking
+Click the **👎 thumbs-down button** on any recommended track to exclude it
+from future recommendations. Blocked tracks are saved to `blocked_tracks.json`
+and never resurface, even after server restarts or re-runs.
+
+### Keeping it Fresh
+
+Three ways to refresh:
+
+- **Click the button** — on the dashboard itself (easiest if you have access)
+- **Re-run the server** — `python3 server.py` regenerates everything on startup
+- **Cron** — automate background refreshes (make sure server is running):
+   ```bash
+   # Add to crontab to refresh weekly
+   0 9 * * 1 curl -s http://localhost:8080/refresh -X POST > /dev/null
+   ```
+
+## Running as a persistent service
+
+To keep the server running after logout or reboot, use systemd.
+
+`lastfm-dashboard.service` is included — adjust the paths if your install
+isn't at `/opt/lastfm-recommender`, then:
 
 ```bash
-python3 server.py
+sudo cp lastfm-dashboard.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now lastfm-dashboard
 ```
 
-This starts a server on port `8080`. Point your reverse proxy at
-`http://<host>:8080`. The first request generates a dashboard if one
-doesn't exist yet; after that, the button on the page triggers a
-refresh (usually 15–30 seconds) and reloads automatically when done.
-
-**Keep it running with systemd** so it survives reboots and restarts
-on failure. `lastfm-dashboard.service` is included — adjust the paths
-if your install isn't at `/opt/lastfm-recommender`, then:
-
-```bash
-cp lastfm-dashboard.service /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable --now lastfm-dashboard
-```
-
-Check it's up with `systemctl status lastfm-dashboard` or `curl
-localhost:8080`.
-
-## Keeping it fresh
-
-Three ways to refresh, pick whichever fits how you're running it:
-
-- **Click the button** — if you're running `server.py`, just click
-  "Refresh Recommendations" on the dashboard itself.
-- **Re-run manually** — `python3 lastfm_recommender.py` regenerates
-  `dashboard.html` directly; works whether or not `server.py` is running.
-- **Cron** — automate it, e.g. weekly, regardless of which mode you use:
-  ```bash
-  crontab -e
-  # add:
-  0 9 * * 1 cd /path/to/lastfm-recommender && /usr/bin/python3 lastfm_recommender.py
-  ```
+Check it's up with `systemctl status lastfm-dashboard` or `curl localhost:8080`.
 
 ## Tuning it
 
@@ -139,3 +137,16 @@ Everything is in `lastfm_recommender.py` — a few knobs worth knowing:
 - If your scrobble history is thin (a few hundred scrobbles), the
   "Discover" lists may come back sparse — the algorithm needs a
   reasonable number of top artists to seed from.
+- Blocked tracks are stored in `blocked_tracks.json`. Delete this file
+  to unblock all tracks and start fresh.
+
+## Files
+
+- `lastfm_recommender.py` — Core recommendation engine and dashboard rendering
+- `server.py` — Flask web server with refresh and track-blocking endpoints
+- `config.json` — Your credentials (created from `config.example.json`)
+- `dashboard.html` — Generated dashboard (served by Flask)
+- `recommendations.json` — Raw recommendation data as JSON
+- `blocked_tracks.json` — List of blocked track keys (auto-created on first block)
+- `lastfm-dashboard.service` — systemd service file for persistent running
+````
