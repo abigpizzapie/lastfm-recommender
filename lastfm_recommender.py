@@ -350,7 +350,7 @@ def render_dashboard(payload):
         </div>""" for i, a in enumerate(artist_recs, 1)) or '<p class="empty">No new artists surfaced this run.</p>'
 
     track_cards = "".join(f"""
-        <div class="card" data-track-key="{esc(t['track_key'])}">
+        <div class="card track-card" data-track-key="{esc(t['track_key'])}">
           <div class="card-index">{i:02d}</div>
           <div class="card-body">
             <div class="card-name">{esc(t['track'])}</div>
@@ -574,9 +574,16 @@ def render_dashboard(payload):
     border-bottom-color: var(--accent);
   }}
 
+  .track-card {{
+    padding-bottom: 52px;
+  }}
+  .track-card .card-links {{
+    padding-right: 44px;
+  }}
+
   .btn-block {{
     position: absolute;
-    top: 12px;
+    bottom: 12px;
     right: 12px;
     width: 28px;
     height: 28px;
@@ -602,9 +609,8 @@ def render_dashboard(payload):
     cursor: not-allowed;
   }}
 
-  .card.blocked {{
-    opacity: 0.4;
-    pointer-events: none;
+  .track-card.blocked {{
+    display: none;
   }}
 
   .empty {{ color: var(--dim); font-size: 14px; }}
@@ -795,10 +801,32 @@ def render_dashboard(payload):
 </div>
 
 <script>
-// Load blocked tracks from localStorage
-function loadBlockedTracks() {{
+// Load blocked tracks from localStorage, then merge server-backed blocks
+async function loadBlockedTracks() {{
+  let blocked = {{}};
   const stored = localStorage.getItem('blockedTracks');
-  return stored ? JSON.parse(stored) : {{}};
+  if (stored) {{
+    try {{
+      blocked = JSON.parse(stored) || {{}};
+    }} catch (err) {{
+      blocked = {{}};
+    }}
+  }}
+
+  try {{
+    const response = await fetch('/blocked-tracks');
+    if (response.ok) {{
+      const data = await response.json();
+      for (const key of data.blocked || []) {{
+        blocked[key] = true;
+      }}
+      saveBlockedTracks(blocked);
+    }}
+  }} catch (err) {{
+    // offline mode: localStorage remains the source of truth
+  }}
+
+  return blocked;
 }}
 
 function saveBlockedTracks(blocked) {{
@@ -856,6 +884,20 @@ function renderBlockedList(blocked) {{
   }});
 }}
 
+function applyBlockedTracks(blocked) {{
+  document.querySelectorAll('.track-card[data-track-key]').forEach(card => {{
+    const trackKey = card.dataset.trackKey;
+    const blockBtn = card.querySelector('.btn-block');
+    if (blocked[trackKey]) {{
+      card.classList.add('blocked');
+      if (blockBtn) blockBtn.disabled = true;
+    }} else {{
+      card.classList.remove('blocked');
+      if (blockBtn) blockBtn.disabled = false;
+    }}
+  }});
+}}
+
 function escapeHtml(text) {{
   const div = document.createElement('div');
   div.textContent = text;
@@ -863,8 +905,7 @@ function escapeHtml(text) {{
 }}
 
 // Initialize
-let blocked = loadBlockedTracks();
-updateBlockedButton(blocked);
+let blocked = {{}};
 
 // Modal controls
 const modal = document.getElementById('blocked-modal');
@@ -914,6 +955,14 @@ document.querySelectorAll('.btn-block').forEach(btn => {{
     }}
   }});
 }});
+
+async function initBlockedState() {{
+  blocked = await loadBlockedTracks();
+  updateBlockedButton(blocked);
+  applyBlockedTracks(blocked);
+}}
+
+initBlockedState();
 </script>
 </body>
 </html>

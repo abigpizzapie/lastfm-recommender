@@ -90,6 +90,12 @@ def status():
     return _state
 
 
+@app.route("/blocked-tracks")
+def blocked_tracks():
+    blocked = sorted(lr.load_blocked_tracks())
+    return jsonify({"blocked": blocked})
+
+
 @app.route("/block-track", methods=["POST"])
 def block_track():
     """Block a track from future recommendations."""
