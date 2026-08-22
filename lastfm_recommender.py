@@ -28,6 +28,7 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote_plus
+import base64
 
 try:
     from zoneinfo import ZoneInfo
@@ -65,6 +66,21 @@ def save_blocked_tracks(blocked):
     """Save the set of blocked track keys to disk."""
     data = {"blocked": sorted(list(blocked))}
     BLOCKED_TRACKS_PATH.write_text(json.dumps(data, indent=2))
+
+
+# --------------------------------------------------------------------------
+# SVG icon helpers
+# --------------------------------------------------------------------------
+
+def get_minus_icon_data_uri(color):
+    """Generate a data URI for the minus icon SVG with the specified color."""
+    svg = f"""<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 50 50">
+<circle fill="none" stroke="{color}" stroke-linejoin="round" stroke-width="2" cx="25" cy="25" r="23.667"/>
+<line fill="none" stroke="{color}" stroke-linecap="round" stroke-linejoin="round" stroke-width="3" x1="39.5" y1="25" x2="10.5" y2="25"/>
+</svg>"""
+    encoded = base64.b64encode(svg.encode()).decode()
+    return f"data:image/svg+xml;base64,{encoded}"
 
 
 # --------------------------------------------------------------------------
@@ -338,16 +354,20 @@ def render_dashboard(payload):
               <a href="{esc(t['youtube_url'])}" target="_blank" rel="noopener">YouTube</a>
               <a href="{esc(t['spotify_url'])}" target="_blank" rel="noopener">Spotify</a>
             </div>
-            <button class="btn-block" data-track-key="{esc(t['track_key'])}" title="Don't recommend this track again">👎</button>
+            <button class="btn-block" data-track-key="{esc(t['track_key'])}" title="Don't recommend this track again"></button>
           </div>
         </div>""" for i, t in enumerate(track_recs, 1)) or '<p class="empty">No new tracks surfaced this run.</p>'
+
+    # Generate SVG data URIs for the minus icon
+    minus_icon_default = get_minus_icon_data_uri("#c85656")
+    minus_icon_hover = get_minus_icon_data_uri("#22ff00")
 
     doc = f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Music Discovery Dashboard \u2014 {esc(stats['username'])}</title>
+<title>Liner Notes \u2014 {esc(stats['username'])}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
@@ -357,7 +377,7 @@ def render_dashboard(payload):
     --paper: #efe7d8;
     --ink: #efe7d8;
     --dim: #a89e8c;
-    --accent: #22ff00;
+    --accent: #c98a2c;
     --accent2: #3e6e64;
     --line: rgba(239,231,216,0.12);
   }}
@@ -524,22 +544,28 @@ def render_dashboard(payload):
     position: absolute;
     top: 12px;
     right: 12px;
+    width: 28px;
+    height: 28px;
     background: none;
-    border: 1px solid var(--line);
-    color: var(--dim);
-    padding: 6px 8px;
-    border-radius: 4px;
+    border: none;
+    padding: 0;
     cursor: pointer;
-    font-size: 14px;
-    transition: all 0.2s ease;
+    transition: transform 0.2s ease;
+    background-image: url('{minus_icon_default}');
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
   }}
   .btn-block:hover {{
-    background: rgba(255, 0, 0, 0.1);
-    color: #ff6b6b;
-    border-color: #ff6b6b;
+    transform: scale(1.1);
+    background-image: url('{minus_icon_hover}');
   }}
   .btn-block:active {{
     transform: scale(0.95);
+  }}
+  .btn-block:disabled {{
+    opacity: 0.5;
+    cursor: not-allowed;
   }}
 
   .card.blocked {{
