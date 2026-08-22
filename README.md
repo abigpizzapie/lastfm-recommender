@@ -1,4 +1,3 @@
-````markdown
 # Last.fm Recommendation Engine
 
 A self-hosted, Linux-friendly tool that turns your Last.fm scrobble history
