@@ -17,7 +17,7 @@ import threading
 import time
 import traceback
 
-from flask import Flask, Response, redirect, request
+from flask import Flask, Response, redirect, request, jsonify
 
 import lastfm_recommender as lr
 
@@ -88,6 +88,25 @@ def refreshing():
 @app.route("/status")
 def status():
     return _state
+
+
+@app.route("/block-track", methods=["POST"])
+def block_track():
+    """Block a track from future recommendations."""
+    try:
+        data = request.get_json()
+        track_key = data.get("track_key")
+        
+        if not track_key:
+            return jsonify({"error": "Missing track_key"}), 400
+        
+        blocked = lr.load_blocked_tracks()
+        blocked.add(track_key)
+        lr.save_blocked_tracks(blocked)
+        
+        return jsonify({"success": True, "track_key": track_key}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 REFRESHING_HTML = """<!doctype html>
