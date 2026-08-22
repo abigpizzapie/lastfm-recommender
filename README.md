@@ -19,7 +19,7 @@ your machine.
    scoring every candidate by `seed_weight × similarity_match`.
 4. Filters out anything you've already scrobbled, so you only see
    genuinely new artists/tracks.
-5. Filters out any tracks you've marked with a thumbs-down (👎), so
+5. Filters out any tracks you've marked with a minus (-), so
    blocked recommendations never resurface.
 6. Looks up a 30-second preview clip for each recommended track via
    Apple's iTunes Search API, so you can hear it without leaving the page.
