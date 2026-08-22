@@ -66,7 +66,7 @@ def index():
             '<div style="max-width:900px;margin:24px auto 0;padding:14px 18px;'
             'background:#3a1f1f;border:1px solid #6b2c2c;color:#f3d6d6;'
             'font-family:monospace;font-size:13px;border-radius:4px;">'
-            "Last refresh failed \u2014 check the server logs.</div>"
+            "Last refresh failed — check the server logs.</div>"
         )
         content = content.replace("<body>", "<body>" + banner, 1)
 
@@ -100,16 +100,36 @@ def blocked_tracks():
 def block_track():
     """Block a track from future recommendations."""
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
         track_key = data.get("track_key")
-        
+
         if not track_key:
             return jsonify({"error": "Missing track_key"}), 400
-        
+
         blocked = lr.load_blocked_tracks()
         blocked.add(track_key)
         lr.save_blocked_tracks(blocked)
-        
+
+        return jsonify({"success": True, "track_key": track_key}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/unblock-track", methods=["POST"])
+def unblock_track():
+    """Unblock a track so it can appear in future recommendations."""
+    try:
+        data = request.get_json() or {}
+        track_key = data.get("track_key")
+
+        if not track_key:
+            return jsonify({"error": "Missing track_key"}), 400
+
+        blocked = lr.load_blocked_tracks()
+        if track_key in blocked:
+            blocked.remove(track_key)
+            lr.save_blocked_tracks(blocked)
+
         return jsonify({"success": True, "track_key": track_key}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -120,7 +140,7 @@ REFRESHING_HTML = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Refreshing\u2026</title>
+<title>Refreshing…</title>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Inter:wght@400;500&display=swap" rel="stylesheet">
 <style>
   body { margin:0; background:#15120f; color:#efe7d8; font-family:'Inter',system-ui,sans-serif;
@@ -131,8 +151,8 @@ REFRESHING_HTML = """<!doctype html>
 </head>
 <body>
 <div>
-  <h1>Refreshing your recommendations\u2026</h1>
-  <p>Walking Last.fm's similarity graph, usually takes 15\u201330 seconds.</p>
+  <h1>Refreshing your recommendations…</h1>
+  <p>Walking Last.fm's similarity graph, usually takes 15–30 seconds.</p>
 </div>
 <script>
 async function poll() {
