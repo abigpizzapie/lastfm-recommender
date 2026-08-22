@@ -93,7 +93,7 @@ likely for obscure/underground picks) show a disabled, grayed-out button;
 the Last.fm/YouTube/Spotify links next to it still work as a fallback.
 
 ### Track Blocking
-Click the **👎 thumbs-down button** on any recommended track to exclude it
+Click the  **minus button** on any recommended track to exclude it
 from future recommendations. Blocked tracks are saved to `blocked_tracks.json`
 and never resurface, even after page reloads, server restarts, or re-runs.
 The dashboard rehydrates blocked keys from the server and keeps a local
